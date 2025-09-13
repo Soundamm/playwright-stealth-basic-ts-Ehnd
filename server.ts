@@ -14,7 +14,10 @@ app.get('/', (req, res) => {
   res.json({ 
     status: 'ok', 
     message: 'Playwright Stealth API funcionando en Railway',
-    endpoints: ['/playwright']
+    endpoints: {
+      'POST /playwright': 'Captura screenshot y título de una página',
+      'POST /resolve-url': 'Resuelve URL final (simplificado)'
+    }
   });
 });
 
