@@ -57,12 +57,12 @@ app.post('/playwright', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Error en Playwright:', error);
-    res.status(500).json({ 
-      status: 'error', 
-      message: error.message 
-    });
-  }
+  console.error('Error en Playwright:', error);
+  res.status(500).json({ 
+    status: 'error', 
+    message: error.message  // ❌ Error TS18046 aquí
+  });
+}
 });
 
 const PORT = process.env.PORT || 3000;
