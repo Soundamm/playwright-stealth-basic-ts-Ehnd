@@ -76,6 +76,84 @@ app.post('/playwright', async (req, res) => {
   }
 });
 
+// Endpoint para seguir redirecciones hasta la URL final
+app.post('/final-url', async (req, res) => {
+  try {
+    const { url } = req.body;
+    
+    if (!url) {
+      return res.status(400).json({ 
+        status: 'error', 
+        message: 'URL es requerida' 
+      });
+    }
+
+    console.log(`🔗 Siguiendo redirecciones para: ${url}`);
+    
+    const browser = await chromium.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-blink-features=AutomationControlled'
+      ]
+    });
+
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    });
+
+    const page = await context.newPage();
+    
+    // Array para guardar el chain de redirecciones
+    const redirectChain: string[] = [];
+    
+    // Escuchar todas las respuestas para capturar redirecciones
+    page.on('response', response => {
+      redirectChain.push(response.url());
+    });
+    
+    // Navegar y seguir todas las redirecciones
+    const response = await page.goto(url, { 
+      waitUntil: 'domcontentloaded',
+      timeout: 30000 
+    });
+    
+    const finalUrl = page.url();
+    const title = await page.title();
+    const statusCode = response?.status() || 0;
+    
+    await browser.close();
+    
+    res.json({
+      status: 'success',
+      originalUrl: url,
+      finalUrl: finalUrl,
+      title: title,
+      statusCode: statusCode,
+      redirectCount: redirectChain.length - 1,
+      redirectChain: [...new Set(redirectChain)] // Eliminar duplicados
+    });
+    
+  } catch (error) {
+    if (error instanceof Error) {
+      res.status(500).json({ 
+        status: 'error', 
+        message: error.message,
+        originalUrl: req.body.url || 'unknown'
+      });
+    } else {
+      res.status(500).json({ 
+        status: 'error', 
+        message: 'Error desconocido al seguir redirecciones',
+        originalUrl: req.body.url || 'unknown'
+      });
+    }
+  }
+});
+
+
 // ✅ Corrección 2: Convertir PORT a number
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
