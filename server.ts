@@ -45,7 +45,10 @@ app.post('/playwright', async (req, res) => {
     await page.goto(url, { waitUntil: 'load' });
     
     const title = await page.title();
-    const screenshot = await page.screenshot({ encoding: 'base64' });
+    
+    // ✅ Corrección 1: Usar screenshot() sin encoding y convertir a base64
+    const screenshotBuffer = await page.screenshot();
+    const screenshotBase64 = screenshotBuffer.toString('base64');
     
     await browser.close();
     
@@ -53,7 +56,7 @@ app.post('/playwright', async (req, res) => {
       status: 'success',
       title,
       url,
-      screenshot: `data:image/png;base64,${screenshot}`
+      screenshot: `data:image/png;base64,${screenshotBase64}`
     });
     
   } catch (error) {
@@ -73,7 +76,8 @@ app.post('/playwright', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
+// ✅ Corrección 2: Convertir PORT a number
+const PORT = parseInt(process.env.PORT || '3000', 10);
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Servidor Playwright corriendo en http://0.0.0.0:${PORT}`);
