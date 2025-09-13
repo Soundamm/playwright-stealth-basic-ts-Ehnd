@@ -20,4 +20,4 @@ RUN npm run build
 ENV NODE_ENV=production
 
 # Start the application
-CMD ["npm", "start", "server", "final-url"]
+CMD ["npm", "start", "final-url"]
