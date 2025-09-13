@@ -154,9 +154,59 @@ app.post('/final-url', async (req, res) => {
 });
 
 
+
 // ✅ Corrección 2: Convertir PORT a number
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Servidor Playwright corriendo en http://0.0.0.0:${PORT}`);
 });
+
+
+// Endpoint redirecciones URL final
+app.post('/resolve-url', async (req, res) => {
+  try {
+    const { url } = req.body;
+    
+    if (!url) {
+      return res.status(400).json({ 
+        status: 'error', 
+        message: 'URL es requerida' 
+      });
+    }
+
+    const browser = await chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+    });
+
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    const finalUrl = page.url();
+    
+    await browser.close();
+    
+    res.json({
+      status: 'success',
+      originalUrl: url,
+      finalUrl: finalUrl,
+      redirected: url !== finalUrl
+    });
+    
+  } catch (error) {
+    if (error instanceof Error) {
+      res.status(500).json({ 
+        status: 'error', 
+        message: error.message 
+      });
+    } else {
+      res.status(500).json({ 
+        status: 'error', 
+        message: 'Error desconocido' 
+      });
+    }
+  }
+});
+
