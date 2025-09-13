@@ -4,10 +4,9 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc",
-    "start": "npm run build && node dist/main.js",
-    "dev": "ts-node main.ts",
+    "start": "npm run build && node dist/server.ts",
+    "dev": "ts-node server.ts",
     "test": "npm run build && node dist/main.js",
-    "server": "npm run build && node dist/server.js",
     "final-url": "node getFinalUrl-playwright.js",
     "install-browsers": "npx playwright install chromium"
   },
