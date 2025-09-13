@@ -20,7 +20,4 @@ RUN npm run build
 ENV NODE_ENV=production
 
 # Start the application
-CMD ["npm", "start"]
-
-# Puertos
-EXPOSE 3000
+CMD ["npm", "start", "server.js", "final-url"]
