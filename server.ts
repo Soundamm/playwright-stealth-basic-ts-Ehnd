@@ -166,19 +166,20 @@ app.listen(PORT, '0.0.0.0', () => {
 });
 
 
-// Endpoint mejorado para seguir redirecciones de campañas de marketing
 app.post('/resolve-url', async (req, res) => {
   try {
     const { url, userAgent, timeout = 30000 } = req.body;
     
-    if (!url) {
+    // ✅ Validación inicial robusta
+    if (!url || typeof url !== 'string' || url.trim().length === 0) {
       return res.status(400).json({ 
         status: 'error', 
-        message: 'URL es requerida' 
+        message: 'URL válida es requerida' 
       });
     }
 
-    console.log(`🔗 Siguiendo redirecciones para URL de marketing: ${url}`);
+    const cleanUrl = url.trim();
+    console.log(`🔗 Procesando URL: ${cleanUrl}`);
     
     const browser = await chromium.launch({
       headless: true,
@@ -195,36 +196,42 @@ app.post('/resolve-url', async (req, res) => {
     const context = await browser.newContext({
       userAgent: userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       viewport: { width: 1920, height: 1080 },
-      // Simular headers reales de email click
       extraHTTPHeaders: {
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5',
         'Accept-Encoding': 'gzip, deflate, br',
         'DNT': '1',
         'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Cache-Control': 'no-cache'
+        'Upgrade-Insecure-Requests': '1'
       }
     });
 
     const page = await context.newPage();
     
-    // Array para el chain completo de redirecciones
     const redirectChain: Array<{url: string, status: number, timestamp: number}> = [];
     let finalError = null;
     
-    // Interceptar todas las respuestas
+    // ✅ Manejo seguro de respuestas
     page.on('response', response => {
-      redirectChain.push({
-        url: response.url(),
-        status: response.status(),
-        timestamp: Date.now()
-      });
+      try {
+        const responseUrl = response.url();
+        const responseStatus = response.status();
+        if (responseUrl && typeof responseUrl === 'string') {
+          redirectChain.push({
+            url: responseUrl,
+            status: responseStatus || 0,
+            timestamp: Date.now()
+          });
+        }
+      } catch (error) {
+        console.log('Error capturando respuesta:', error);
+      }
     });
 
-    // Manejar errores de página
+    // ✅ Manejo robusto de errores de página
     page.on('pageerror', error => {
-      console.log('Page error:', error.message);
+      console.log('Page error capturado:', error?.message || 'Error desconocido');
+      finalError = `Page error: ${error?.message || 'Error de JavaScript en la página'}`;
     });
 
     let finalUrl: string;
@@ -232,105 +239,109 @@ app.post('/resolve-url', async (req, res) => {
     let statusCode: number;
 
     try {
-      // Navegar con timeout extendido
-      const response = await page.goto(url, { 
+      const response = await page.goto(cleanUrl, { 
         waitUntil: 'domcontentloaded',
         timeout: timeout
       });
       
-      // Esperar un poco más para redirecciones JavaScript
       await page.waitForTimeout(3000);
       
       finalUrl = page.url();
       title = await page.title();
       statusCode = response?.status() || 0;
       
-      // Si la URL final es muy similar a la original, intentar hacer click en links
-      if (finalUrl === url || finalUrl.includes('beehiiv.com') || finalUrl.includes('mail.')) {
-        console.log('🔄 Intentando buscar redirecciones automáticas...');
+      // ✅ Detección segura de redirecciones automáticas
+      if (finalUrl === cleanUrl || (finalUrl && finalUrl.toLowerCase().includes('beehiiv.com')) || 
+          (finalUrl && (finalUrl.toLowerCase().includes('mail.') || finalUrl.toLowerCase().includes('link.')))) {
         
-        // Buscar meta refresh
-        const metaRefresh = await page.$eval('meta[http-equiv="refresh"]', 
-          el => el.getAttribute('content')).catch(() => null);
+        console.log('🔄 Buscando redirecciones adicionales...');
         
-        if (metaRefresh) {
-          const match = metaRefresh.match(/url=(.+)/i);
-          if (match) {
-            console.log('🔄 Found meta refresh:', match[1]);
-            await page.goto(match[1], { waitUntil: 'domcontentloaded' });
+        // ✅ Meta refresh seguro
+        try {
+          const metaRefresh = await page.evaluate(() => {
+            const metaEl = document.querySelector('meta[http-equiv="refresh"]');
+            return metaEl?.getAttribute('content') || null;
+          });
+          
+          if (metaRefresh && typeof metaRefresh === 'string') {
+            const match = metaRefresh.toLowerCase().match(/url=(.+)/i);
+            if (match && match[1]) {
+              console.log('🔄 Meta refresh encontrado:', match[1]);
+              await page.goto(match[1], { waitUntil: 'domcontentloaded' });
+              finalUrl = page.url();
+              title = await page.title();
+            }
+          }
+        } catch (metaError) {
+          console.log('Error procesando meta refresh:', metaError);
+        }
+        
+        // ✅ JavaScript redirect seguro
+        try {
+          const jsRedirect = await page.evaluate(() => {
+            const scripts = Array.from(document.querySelectorAll('script'));
+            for (const script of scripts) {
+              const content = script.textContent;
+              if (content && typeof content === 'string' && content.includes('window.location')) {
+                const match = content.match(/window\.location(?:\.href)?\s*=\s*['"`]([^'"`]+)['"`]/);
+                if (match && match[1]) return match[1];
+              }
+            }
+            return null;
+          });
+          
+          if (jsRedirect && typeof jsRedirect === 'string') {
+            console.log('🔄 JS redirect encontrado:', jsRedirect);
+            await page.goto(jsRedirect, { waitUntil: 'domcontentloaded' });
             finalUrl = page.url();
             title = await page.title();
           }
-        }
-        
-        // Buscar scripts de redirección
-        const jsRedirect = await page.evaluate(() => {
-          // Buscar window.location en scripts
-          const scripts = Array.from(document.querySelectorAll('script'));
-          for (const script of scripts) {
-            if (script.textContent?.includes('window.location')) {
-              const match = script.textContent.match(/window\.location(?:\.href)?\s*=\s*['"`]([^'"`]+)['"`]/);
-              if (match) return match[1];
-            }
-          }
-          return null;
-        });
-        
-        if (jsRedirect) {
-          console.log('🔄 Found JS redirect:', jsRedirect);
-          await page.goto(jsRedirect, { waitUntil: 'domcontentloaded' });
-          finalUrl = page.url();
-          title = await page.title();
+        } catch (jsError) {
+          console.log('Error procesando JS redirect:', jsError);
         }
       }
       
     } catch (error) {
-      finalError = error instanceof Error ? error.message : 'Error desconocido';
-      finalUrl = redirectChain.length > 0 ? redirectChain[redirectChain.length - 1].url : url;
+      finalError = error instanceof Error ? error.message : 'Error de navegación';
+      finalUrl = redirectChain.length > 0 ? redirectChain[redirectChain.length - 1].url : cleanUrl;
       title = 'Error loading page';
       statusCode = 0;
     }
     
     await browser.close();
     
-    // Analizar cadena de redirecciones
+    // ✅ Análisis seguro de URLs
     const uniqueUrls = [...new Set(redirectChain.map(r => r.url))];
-    const redirectCount = uniqueUrls.length - 1;
+    const redirectCount = Math.max(0, uniqueUrls.length - 1);
     
-    // Determinar si realmente se resolvió
-    const wasResolved = finalUrl !== url && 
-                       !finalUrl.includes('beehiiv.com') && 
-                       !finalUrl.includes('mail.') &&
-                       !finalUrl.includes('link.') &&
-                       !finalUrl.includes('click.') &&
-                       !finalUrl.includes('tracking.');
+    // ✅ Detección segura de resolución
+    const wasResolved = finalUrl !== cleanUrl && 
+                       finalUrl && 
+                       !finalUrl.toLowerCase().includes('beehiiv.com') && 
+                       !finalUrl.toLowerCase().includes('mail.') &&
+                       !finalUrl.toLowerCase().includes('link.') &&
+                       !finalUrl.toLowerCase().includes('click.') &&
+                       !finalUrl.toLowerCase().includes('tracking.');
     
     res.json({
       status: finalError ? 'warning' : 'success',
-      originalUrl: url,
-      finalUrl: finalUrl,
+      originalUrl: cleanUrl,
+      finalUrl: finalUrl || cleanUrl,
       wasResolved: wasResolved,
-      title: title,
+      title: title || 'Sin título',
       statusCode: statusCode,
       redirectCount: redirectCount,
       redirectChain: uniqueUrls,
       error: finalError,
-      processingTime: Date.now() - redirectChain[0]?.timestamp || 0
+      processingTime: redirectChain.length > 0 ? (Date.now() - redirectChain[0].timestamp) : 0
     });
     
   } catch (error) {
-    if (error instanceof Error) {
-      res.status(500).json({ 
-        status: 'error', 
-        message: error.message,
-        originalUrl: req.body.url || 'unknown'
-      });
-    } else {
-      res.status(500).json({ 
-        status: 'error', 
-        message: 'Error desconocido al procesar URL de marketing',
-        originalUrl: req.body.url || 'unknown'
-      });
-    }
+    console.error('❌ Error general:', error);
+    res.status(500).json({ 
+      status: 'error', 
+      message: error instanceof Error ? error.message : 'Error desconocido',
+      originalUrl: req.body?.url || 'unknown'
+    });
   }
 });
