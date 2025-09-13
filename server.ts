@@ -57,22 +57,21 @@ app.post('/playwright', async (req, res) => {
     });
     
   } catch (error) {
-  console.error('Error en Playwright:', error);
-  
-  // ✅ Type guard para verificar que es una instancia de Error
-  if (error instanceof Error) {
-    res.status(500).json({ 
-      status: 'error', 
-      message: error.message 
-    });
-  } else {
-    res.status(500).json({ 
-      status: 'error', 
-      message: 'Error desconocido ocurrió' 
-    });
+    console.error('Error en Playwright:', error);
+    
+    if (error instanceof Error) {
+      res.status(500).json({ 
+        status: 'error', 
+        message: error.message 
+      });
+    } else {
+      res.status(500).json({ 
+        status: 'error', 
+        message: 'Error desconocido ocurrió' 
+      });
+    }
   }
-}
-
+});
 
 const PORT = process.env.PORT || 3000;
 
