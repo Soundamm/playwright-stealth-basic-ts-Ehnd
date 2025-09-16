@@ -30,18 +30,14 @@ app.post('/playwright', async (req, res) => {
       headless: true,
       args: [
         '--no-sandbox',
-        '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',
         '--disable-renderer-backgrounding',
-        '--disable-extensions',
         '--disable-plugins',
         '--disable-web-security',
         '--disable-features=VizDisplayCompositor',
         '--single-process', // CLAVE: Evita crear múltiples procesos
-        '--no-first-run',
-        '--no-default-browser-check',
         '--memory-pressure-off'
   ],
   timeout: 30000 // Timeout más corto
