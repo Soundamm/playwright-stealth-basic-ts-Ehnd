@@ -9,29 +9,6 @@ COPY tsconfig.json ./
 
 # Install dependencies
 RUN npm install
-# Instalar dependencias del sistema para Playwright
-RUN apt-get update && apt-get install -y \
-    wget \
-    ca-certificates \
-    fonts-liberation \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libdrm2 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxrandr2 \
-    libgbm1 \
-    libxss1 \
-    libnss3
-
-# Instalar Node.js y Playwright
-RUN npm install playwright
-RUN npx playwright install chromium
-RUN npx playwright install-deps chromium
-
-# Variables de entorno
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=false
 
 # Copy source code
 COPY . .
