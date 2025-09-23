@@ -5,7 +5,6 @@
   "scripts": {
     "build": "tsc",
     "start": "npm run build && node dist/server.js",
-    "postinstall": "npx playwright install chromium",
     "dev": "ts-node server.ts",
     "test": "npm run build && node dist/main.js",
     "server": "npm run build && node dist/server.js",
@@ -24,8 +23,5 @@
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
-  },
-  "devDependencies": {
-    "playwright": "1.50.0"
   }
 }
