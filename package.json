@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc && npx playwright install chromium",
+    "build": "tsc",
     "start": "npm run build && node dist/server.js",
     "postinstall": "npx playwright install chromium"
     "dev": "ts-node server.ts",
