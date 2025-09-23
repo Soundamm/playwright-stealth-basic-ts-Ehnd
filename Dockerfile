@@ -1,6 +1,5 @@
 # Use Playwright v1.50.0 with noble (Ubuntu 24.04)
 FROM mcr.microsoft.com/playwright:v1.50.0-noble
-
 WORKDIR /app
 
 # Copy package files first for better caching
@@ -18,6 +17,11 @@ RUN npm run build
 
 # Set environment variables
 ENV NODE_ENV=production
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms/playwright
+ENV NODE_OPTIONS="--max-old-space-size=512"
 
-# Start the application
-CMD ["npm", "start", "final-url"]
+# Expose port
+EXPOSE 3000
+
+# Start the application (comando corregido)
+CMD ["node", "dist/server.js"]
