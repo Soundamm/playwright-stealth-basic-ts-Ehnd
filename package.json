@@ -5,7 +5,7 @@
   "scripts": {
     "build": "tsc",
     "start": "npm run build && node dist/server.js",
-    "postinstall": "npx playwright install chromium"
+    "postinstall": "npx playwright install chromium",
     "dev": "ts-node server.ts",
     "test": "npm run build && node dist/main.js",
     "server": "npm run build && node dist/server.js",
