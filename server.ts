@@ -5,6 +5,104 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 // Configurar stealth plugin
 chromium.use(StealthPlugin());
 
+// =======================================
+// POOL DE BROWSERS - AGREGAR AQUÍ
+// =======================================
+let browserPool: any[] = [];
+const MAX_BROWSERS = 2; // Limitar a 2 navegadores simultáneos
+let isShuttingDown = false;
+
+async function getBrowser() {
+  if (isShuttingDown) {
+    throw new Error('Server is shutting down');
+  }
+  
+  if (browserPool.length === 0) {
+    console.log('🚀 Creando nuevo browser...');
+    const browser = await chromium.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-setuid-sandbox',
+        '--single-process',
+        '--memory-pressure-off',
+        '--max_old_space_size=512',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding'
+      ],
+      timeout: 30000
+    });
+    return browser;
+  }
+  
+  console.log('♻️ Reutilizando browser del pool...');
+  return browserPool.shift();
+}
+
+async function releaseBrowser(browser: any) {
+  if (isShuttingDown || !browser) {
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (error) {
+        console.error('Error cerrando browser en shutdown:', error);
+      }
+    }
+    return;
+  }
+  
+  if (browserPool.length < MAX_BROWSERS) {
+    browserPool.push(browser);
+    console.log(`📦 Browser devuelto al pool (${browserPool.length}/${MAX_BROWSERS})`);
+  } else {
+    try {
+      await browser.close();
+      console.log('🗑️ Browser cerrado (pool lleno)');
+    } catch (error) {
+      console.error('Error cerrando browser extra:', error);
+    }
+  }
+}
+
+// Limpieza periódica del pool
+setInterval(async () => {
+  if (browserPool.length > 0 && !isShuttingDown) {
+    console.log('🧹 Limpiando pool de navegadores...');
+    const browsersToClose = browserPool.splice(0);
+    
+    for (const browser of browsersToClose) {
+      try {
+        await browser.close();
+      } catch (error) {
+        console.error('Error cerrando browser en limpieza:', error);
+      }
+    }
+    console.log('✨ Pool limpiado');
+  }
+}, 30 * 60 * 1000); // Cada 30 minutos
+
+// Manejo de cierre graceful
+process.on('SIGTERM', async () => {
+  console.log('🛑 Iniciando cierre graceful...');
+  isShuttingDown = true;
+  
+  const browsersToClose = browserPool.splice(0);
+  for (const browser of browsersToClose) {
+    try {
+      await browser.close();
+    } catch (error) {
+      console.error('Error en cierre graceful:', error);
+    }
+  }
+  
+  process.exit(0);
+});
+// =======================================
+// FIN POOL DE BROWSERS
+// =======================================
+
 const app = express();
 
 app.use(express.json());
