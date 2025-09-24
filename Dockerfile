@@ -9,19 +9,22 @@ COPY tsconfig.json ./
 # Install dependencies
 RUN npm install
 
+# Install Playwright browsers with system dependencies
+RUN npx playwright install-deps chromium
+RUN npx playwright install chromium
+
 # Copy source code
 COPY . .
 
 # Build TypeScript
 RUN npm run build
 
-# Set environment variables
+# Set environment variables (remove PLAYWRIGHT_BROWSERS_PATH)
 ENV NODE_ENV=production
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms/playwright
 ENV NODE_OPTIONS="--max-old-space-size=512"
 
 # Expose port
 EXPOSE 3000
 
-# Start the application (comando corregido)
+# Start the application
 CMD ["node", "dist/server.js"]
