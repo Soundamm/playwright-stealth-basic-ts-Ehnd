@@ -21,7 +21,7 @@ RUN npm run build
 
 # Set environment variables (remove PLAYWRIGHT_BROWSERS_PATH)
 ENV NODE_ENV=production
-ENV NODE_OPTIONS="--max-old-space-size=512"
+ENV NODE_OPTIONS="--max-old-space-size=800"
 
 # Expose port
 EXPOSE 3000
