@@ -1,6 +1,9 @@
 import express from 'express';
-import { chromium, Browser, BrowserContext, Page, APIResponse } from 'playwright-extra';
+import { chromium } from 'playwright-extra'; // permanece igual
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+
+// Importa solo los tipos desde 'playwright'
+import type { Browser, BrowserContext, Page, APIResponse } from 'playwright';
 
 chromium.use(StealthPlugin());
 
