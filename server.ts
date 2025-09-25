@@ -27,7 +27,7 @@ async function getBrowser() {
         '--disable-setuid-sandbox',
         '--single-process',
         '--memory-pressure-off',
-        '--max_old_space_size=800',
+        '--max_old_space_size=1500',
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',
         '--disable-renderer-backgrounding',
