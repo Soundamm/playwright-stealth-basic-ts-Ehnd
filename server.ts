@@ -1,24 +1,23 @@
 import express from 'express';
-import { chromium } from 'playwright-extra';
+import { chromium, Browser, BrowserContext, Page, APIResponse } from 'playwright-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 
 chromium.use(StealthPlugin());
 
-let browserPool: any[] = [];
+let browserPool: Browser[] = [];
 const MAX_BROWSERS = 1;
 let isShuttingDown = false;
 
-async function getBrowser() {
+async function getBrowser(): Promise<Browser> {
   if (isShuttingDown) {
     throw new Error('Server is shutting down');
   }
 
-  // Filtrar navegadores desconectados
   browserPool = browserPool.filter(browser => browser.isConnected());
 
   if (browserPool.length === 0) {
     console.log('🚀 Creando nuevo browser...');
-    const browser = await chromium.launch({
+    const browser: Browser = await chromium.launch({
       headless: true,
       args: [
         '--no-sandbox',
@@ -40,10 +39,8 @@ async function getBrowser() {
   const browser = browserPool[0];
   if (!browser.isConnected()) {
     console.log('Browser desconectado, eliminando y creando nuevo...');
-    // Eliminar navegador desconectado
     browserPool = browserPool.filter(b => b !== browser);
     await browser.close().catch(() => {});
-    // Crear uno nuevo
     return getBrowser();
   }
 
@@ -51,10 +48,10 @@ async function getBrowser() {
   return browser;
 }
 
-async function releaseBrowser(browser: any) {
+async function releaseBrowser(browser: Browser): Promise<void> {
   if (browser && browser.isConnected()) {
     try {
-      const contexts = browser.contexts();
+      const contexts: BrowserContext[] = browser.contexts();
       for (const context of contexts) {
         await context.close();
       }
@@ -65,7 +62,6 @@ async function releaseBrowser(browser: any) {
   }
 }
 
-// Limpieza periódica
 setInterval(async () => {
   if (browserPool.length > 0 && !isShuttingDown) {
     console.log('🧹 Reiniciando pool de navegadores...');
@@ -81,7 +77,6 @@ setInterval(async () => {
   }
 }, 10 * 60 * 1000);
 
-// Cierre graceful
 process.on('SIGTERM', async () => {
   console.log('🛑 Iniciando cierre graceful...');
   isShuttingDown = true;
@@ -100,11 +95,11 @@ const app = express();
 app.use(express.json());
 
 app.post('/final-url', async (req, res) => {
-  let browser = null;
-  let context = null;
+  let browser: Browser | null = null;
+  let context: BrowserContext | null = null;
 
   try {
-    const { url } = req.body;
+    const { url }: { url?: string } = req.body;
     if (!url) {
       return res.status(400).json({ status: 'error', message: 'URL es requerida' });
     }
@@ -115,22 +110,22 @@ app.post('/final-url', async (req, res) => {
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     });
 
-    const page = await context.newPage();
+    const page: Page = await context.newPage();
 
     const redirectChain: string[] = [];
 
-    page.on('response', (response) => {
+    page.on('response', (response: APIResponse) => {
       redirectChain.push(response.url());
     });
 
-    const response = await page.goto(url, {
+    const response: APIResponse | null = await page.goto(url, {
       waitUntil: 'domcontentloaded',
       timeout: 15000,
     });
 
-    const finalUrl = page.url();
-    const title = await page.title();
-    const statusCode = response?.status() || 0;
+    const finalUrl: string = page.url();
+    const title: string = await page.title();
+    const statusCode: number = response?.status() || 0;
 
     await page.close();
 
@@ -149,7 +144,7 @@ app.post('/final-url', async (req, res) => {
     if (browser) {
       try {
         await browser.close();
-        browserPool = browserPool.filter((b) => b !== browser);
+        browserPool = browserPool.filter(b => b !== browser);
       } catch {}
     }
 
@@ -172,7 +167,7 @@ app.post('/final-url', async (req, res) => {
   }
 });
 
-const PORT = parseInt(process.env.PORT || '3000', 10);
+const PORT: number = parseInt(process.env.PORT || '3000', 10);
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Servidor Playwright corriendo en http://0.0.0.0:${PORT}`);
   console.log(`📊 Pool configurado para ${MAX_BROWSERS} navegadores máximo`);
