@@ -33,7 +33,7 @@ async function getBrowser() {
         '--disable-renderer-backgrounding',
         '--disable-features=VizDisplayCompositor'
       ],
-      timeout: 30000
+      timeout: 50000
     });
     return browser;
   }
