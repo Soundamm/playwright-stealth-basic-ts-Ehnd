@@ -1,6 +1,7 @@
 import express from 'express';
 import { chromium } from 'playwright-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { Response, Route } from 'playwright'; // ✅ AGREGAR ESTA LÍNEA
 
 // Configurar stealth plugin
 chromium.use(StealthPlugin());
@@ -9,7 +10,7 @@ chromium.use(StealthPlugin());
 // POOL DE BROWSERS OPTIMIZADO
 // =======================================
 let browserPool: any[] = [];
-const MAX_BROWSERS = 2; // Aumentar para mejor rendimiento
+const MAX_BROWSERS = 2;
 let isShuttingDown = false;
 
 // Argumentos optimizados para memoria y performance
@@ -19,7 +20,7 @@ const BROWSER_ARGS = [
   '--disable-setuid-sandbox',
   '--single-process',
   '--memory-pressure-off',
-  '--max_old_space_size=1500', // Limitar memoria V8
+  '--max_old_space_size=1500',
   '--disable-background-timer-throttling',
   '--disable-backgrounding-occluded-windows',
   '--disable-renderer-backgrounding',
@@ -30,8 +31,7 @@ const BROWSER_ARGS = [
   '--disable-default-apps',
   '--disable-sync',
   '--no-first-run',
-  '--disable-background-networking',
-  '--disable-default-apps'
+  '--disable-background-networking'
 ];
 
 async function getBrowser() {
@@ -44,7 +44,7 @@ async function getBrowser() {
     const browser = await chromium.launch({
       headless: true,
       args: BROWSER_ARGS,
-      timeout: 25000, // Reducir timeout para mejor responsividad
+      timeout: 25000,
       chromiumSandbox: false
     });
     return browser;
@@ -104,7 +104,7 @@ setInterval(async () => {
     }
     console.log('✨ Pool limpiado');
   }
-}, 15 * 60 * 1000); // Cada 15 minutos en lugar de 30
+}, 15 * 60 * 1000);
 
 // Monitoreo de memoria cada 5 minutos
 setInterval(() => {
@@ -135,7 +135,7 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 // EXPRESS APP
 // =======================================
 const app = express();
-app.use(express.json({ limit: '10mb' })); // Limitar tamaño de requests
+app.use(express.json({ limit: '10mb' }));
 
 // Endpoint de prueba actualizado
 app.get('/', (req, res) => {
@@ -153,7 +153,7 @@ app.get('/', (req, res) => {
   });
 });
 
-// ENDPOINT ÚNICO OPTIMIZADO - Combina ambas funcionalidades
+// ENDPOINT ÚNICO OPTIMIZADO
 app.post('/final-url', async (req, res) => {
   let browser = null;
   let context = null;
@@ -171,10 +171,8 @@ app.post('/final-url', async (req, res) => {
 
     console.log(`🔗 Siguiendo redirecciones para: ${url}`);
     
-    // Usar el pool de browsers optimizado
     browser = await getBrowser();
     
-    // Crear contexto con configuración anti-detección optimizada
     context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       viewport: { width: 1366, height: 768 },
@@ -187,16 +185,16 @@ app.post('/final-url', async (req, res) => {
     // Array para guardar el chain de redirecciones
     const redirectChain: string[] = [];
     
-    // Escuchar todas las respuestas para capturar redirecciones
-    page.on('response', response => {
+    // ✅ CORRECCIÓN: Tipo explícito para response
+    page.on('response', (response: Response) => {
       const responseUrl = response.url();
       if (!redirectChain.includes(responseUrl)) {
         redirectChain.push(responseUrl);
       }
     });
     
-    // Bloquear recursos innecesarios para mejor performance
-    await page.route('**/*', (route) => {
+    // ✅ CORRECCIÓN: Tipo explícito para route
+    await page.route('**/*', (route: Route) => {
       const resourceType = route.request().resourceType();
       if (['image', 'font', 'media'].includes(resourceType)) {
         route.abort();
@@ -208,7 +206,7 @@ app.post('/final-url', async (req, res) => {
     // Navegar con timeout optimizado
     const response = await page.goto(url, { 
       waitUntil: 'domcontentloaded',
-      timeout: 12000 // Timeout más agresivo
+      timeout: 12000
     });
     
     const finalUrl = page.url();
@@ -227,7 +225,7 @@ app.post('/final-url', async (req, res) => {
       title: title,
       statusCode: statusCode,
       redirectCount: redirectChain.length - 1,
-      redirectChain: [...new Set(redirectChain)], // Eliminar duplicados
+      redirectChain: [...new Set(redirectChain)],
       processingTime: `${processingTime}ms`,
       poolStats: {
         browsersInPool: browserPool.length,
