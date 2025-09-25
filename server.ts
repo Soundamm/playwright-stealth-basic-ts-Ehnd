@@ -6,27 +6,11 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 chromium.use(StealthPlugin());
 
 // =======================================
-// POOL DE BROWSERS
+// POOL DE BROWSERS - AGREGAR AQUÍ
 // =======================================
 let browserPool: any[] = [];
-const MAX_BROWSERS = 2; // Aumentar a 2 para mejor rendimiento
+const MAX_BROWSERS = 1; // Limitar a 1 navegador simultáneos
 let isShuttingDown = false;
-
-// Argumentos estándar para todos los browsers
-const BROWSER_ARGS = [
-  '--no-sandbox',
-  '--disable-dev-shm-usage',
-  '--disable-setuid-sandbox',
-  '--single-process',
-  '--memory-pressure-off',
-  '--max_old_space_size=1500',
-  '--disable-background-timer-throttling',
-  '--disable-backgrounding-occluded-windows',
-  '--disable-renderer-backgrounding',
-  '--disable-features=VizDisplayCompositor',
-  '--disable-plugins',
-  '--disable-web-security'
-];
 
 async function getBrowser() {
   if (isShuttingDown) {
@@ -37,8 +21,19 @@ async function getBrowser() {
     console.log('🚀 Creando nuevo browser...');
     const browser = await chromium.launch({
       headless: true,
-      args: BROWSER_ARGS,
-      timeout: 30000
+      args: [
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-setuid-sandbox',
+        '--single-process',
+        '--memory-pressure-off',
+        '--max_old_space_size=1500',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-features=VizDisplayCompositor'
+      ],
+      timeout: 50000
     });
     return browser;
   }
@@ -72,7 +67,7 @@ async function releaseBrowser(browser: any) {
   }
 }
 
-// Limpieza periódica del pool (cada 10 minutos en lugar de 30)
+// Limpieza periódica del pool
 setInterval(async () => {
   if (browserPool.length > 0 && !isShuttingDown) {
     console.log('🧹 Limpiando pool de navegadores...');
@@ -87,7 +82,7 @@ setInterval(async () => {
     }
     console.log('✨ Pool limpiado');
   }
-}, 10 * 60 * 1000); // Cada 10 minutos
+}, 30 * 60 * 1000); // Cada 30 minutos
 
 // Manejo de cierre graceful
 process.on('SIGTERM', async () => {
@@ -105,11 +100,12 @@ process.on('SIGTERM', async () => {
   
   process.exit(0);
 });
+// =======================================
+// FIN POOL DE BROWSERS
+// =======================================
 
-// =======================================
-// EXPRESS APP
-// =======================================
 const app = express();
+
 app.use(express.json());
 
 // Endpoint de prueba
@@ -119,18 +115,33 @@ app.get('/', (req, res) => {
     message: 'Playwright Stealth API funcionando en Railway',
     endpoints: {
       'POST /playwright': 'Captura screenshot y título de una página',
-      'POST /final-url': 'Resuelve URL final'
+      'POST /resolve-url': 'Resuelve URL final (simplificado)'
     }
   });
 });
 
-// Endpoint Playwright - CORREGIDO para usar el pool
+// Endpoint Playwright
 app.post('/playwright', async (req, res) => {
-  let browser = null;
   try {
     console.log('🚀 Iniciando test de Playwright...');
     
-    browser = await getBrowser();
+    const browser = await chromium.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-plugins',
+        '--disable-web-security',
+        '--disable-features=VizDisplayCompositor',
+        '--single-process', // CLAVE: Evita crear múltiples procesos
+        '--memory-pressure-off'
+  ],
+  timeout: 30000 // Timeout más corto
+});
+
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       viewport: { width: 1366, height: 768 }
@@ -138,15 +149,17 @@ app.post('/playwright', async (req, res) => {
 
     const page = await context.newPage();
     
+    // Test básico - puedes modificar la URL desde el request
     const url = req.body.url || 'https://bot.sannysoft.com/';
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.goto(url, { waitUntil: 'load' });
     
     const title = await page.title();
+    
+    // ✅ Corrección 1: Usar screenshot() sin encoding y convertir a base64
     const screenshotBuffer = await page.screenshot();
     const screenshotBase64 = screenshotBuffer.toString('base64');
     
-    // Cerrar solo el contexto, no el navegador
-    await context.close();
+    await browser.close();
     
     res.json({
       status: 'success',
@@ -157,20 +170,23 @@ app.post('/playwright', async (req, res) => {
     
   } catch (error) {
     console.error('Error en Playwright:', error);
-    res.status(500).json({ 
-      status: 'error', 
-      message: error instanceof Error ? error.message : 'Error desconocido'
-    });
-  } finally {
-    if (browser) {
-      await releaseBrowser(browser);
+    
+    if (error instanceof Error) {
+      res.status(500).json({ 
+        status: 'error', 
+        message: error.message 
+      });
+    } else {
+      res.status(500).json({ 
+        status: 'error', 
+        message: 'Error desconocido ocurrió' 
+      });
     }
   }
 });
 
-// Endpoint para seguir redirecciones - ÚNICO Y CORREGIDO
+// Endpoint para seguir redirecciones hasta la URL final
 app.post('/final-url', async (req, res) => {
-  let browser = null;
   try {
     const { url } = req.body;
     
@@ -183,7 +199,16 @@ app.post('/final-url', async (req, res) => {
 
     console.log(`🔗 Siguiendo redirecciones para: ${url}`);
     
-    browser = await getBrowser();
+    const browser = await chromium.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-blink-features=AutomationControlled'
+      ]
+    });
+
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     });
@@ -201,15 +226,14 @@ app.post('/final-url', async (req, res) => {
     // Navegar y seguir todas las redirecciones
     const response = await page.goto(url, { 
       waitUntil: 'domcontentloaded',
-      timeout: 15000 
+      timeout: 30000 
     });
     
     const finalUrl = page.url();
     const title = await page.title();
     const statusCode = response?.status() || 0;
     
-    // Cerrar solo el contexto
-    await context.close();
+    await browser.close();
     
     res.json({
       status: 'success',
@@ -218,14 +242,77 @@ app.post('/final-url', async (req, res) => {
       title: title,
       statusCode: statusCode,
       redirectCount: redirectChain.length - 1,
-      redirectChain: [...new Set(redirectChain)]
+      redirectChain: [...new Set(redirectChain)] // Eliminar duplicados
     });
     
   } catch (error) {
-    console.error('Error en final-url:', error);
-    res.status(500).json({ 
-      status: 'error', 
-      message: error instanceof Error ? error.message : 'Error desconocido al seguir redirecciones',
+    if (error instanceof Error) {
+      res.status(500).json({ 
+        status: 'error', 
+        message: error.message,
+        originalUrl: req.body.url || 'unknown'
+      });
+    } else {
+      res.status(500).json({ 
+        status: 'error', 
+        message: 'Error desconocido al seguir redirecciones',
+        originalUrl: req.body.url || 'unknown'
+      });
+    }
+  }
+});
+
+
+
+// ✅ Corrección 2: Convertir PORT a number
+const PORT = parseInt(process.env.PORT || '3000', 10);
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Servidor Playwright corriendo en http://0.0.0.0:${PORT}`);
+});
+
+app.post('/final-url', async (req, res) => {
+  let browser = null;
+  try {
+    const { url } = req.body;
+    if (!url) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'URL es requerida'
+      });
+    }
+
+    browser = await getBrowser();
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    });
+    
+    const page = await context.newPage();
+    
+    // Tu lógica existente aquí...
+    const response = await page.goto(url, {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000 // Reducir timeout
+    });
+    
+    const finalUrl = page.url();
+    const title = await page.title();
+    
+    // Cerrar solo el contexto, no el navegador
+    await context.close();
+    
+    res.json({
+      status: 'success',
+      originalUrl: url,
+      finalUrl: finalUrl,
+      title: title,
+      statusCode: response?.status() || 0
+    });
+    
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: error instanceof Error ? error.message : 'Error desconocido',
       originalUrl: req.body.url || 'unknown'
     });
   } finally {
@@ -233,10 +320,4 @@ app.post('/final-url', async (req, res) => {
       await releaseBrowser(browser);
     }
   }
-});
-
-const PORT = parseInt(process.env.PORT || '3000', 10);
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Servidor Playwright corriendo en http://0.0.0.0:${PORT}`);
 });
