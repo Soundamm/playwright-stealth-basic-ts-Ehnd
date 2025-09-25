@@ -6,11 +6,33 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 chromium.use(StealthPlugin());
 
 // =======================================
-// POOL DE BROWSERS - AGREGAR AQUÍ
+// POOL DE BROWSERS OPTIMIZADO
 // =======================================
 let browserPool: any[] = [];
-const MAX_BROWSERS = 1; // Limitar a 1 navegador simultáneos
+const MAX_BROWSERS = 2; // Aumentar para mejor rendimiento
 let isShuttingDown = false;
+
+// Argumentos optimizados para memoria y performance
+const BROWSER_ARGS = [
+  '--no-sandbox',
+  '--disable-dev-shm-usage',
+  '--disable-setuid-sandbox',
+  '--single-process',
+  '--memory-pressure-off',
+  '--max_old_space_size=1500', // Limitar memoria V8
+  '--disable-background-timer-throttling',
+  '--disable-backgrounding-occluded-windows',
+  '--disable-renderer-backgrounding',
+  '--disable-features=VizDisplayCompositor',
+  '--disable-plugins',
+  '--disable-web-security',
+  '--disable-extensions',
+  '--disable-default-apps',
+  '--disable-sync',
+  '--no-first-run',
+  '--disable-background-networking',
+  '--disable-default-apps'
+];
 
 async function getBrowser() {
   if (isShuttingDown) {
@@ -18,22 +40,12 @@ async function getBrowser() {
   }
   
   if (browserPool.length === 0) {
-    console.log('🚀 Creando nuevo browser...');
+    console.log('🚀 Creando nuevo browser optimizado...');
     const browser = await chromium.launch({
       headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-setuid-sandbox',
-        '--single-process',
-        '--memory-pressure-off',
-        '--max_old_space_size=1500',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--disable-features=VizDisplayCompositor'
-      ],
-      timeout: 50000
+      args: BROWSER_ARGS,
+      timeout: 25000, // Reducir timeout para mejor responsividad
+      chromiumSandbox: false
     });
     return browser;
   }
@@ -54,6 +66,16 @@ async function releaseBrowser(browser: any) {
     return;
   }
   
+  // Limpiar contextos antes de devolver al pool
+  try {
+    const contexts = browser.contexts();
+    for (const context of contexts) {
+      await context.close();
+    }
+  } catch (error) {
+    console.error('Error limpiando contextos:', error);
+  }
+  
   if (browserPool.length < MAX_BROWSERS) {
     browserPool.push(browser);
     console.log(`📦 Browser devuelto al pool (${browserPool.length}/${MAX_BROWSERS})`);
@@ -67,7 +89,7 @@ async function releaseBrowser(browser: any) {
   }
 }
 
-// Limpieza periódica del pool
+// Limpieza más frecuente del pool para mejor gestión de memoria
 setInterval(async () => {
   if (browserPool.length > 0 && !isShuttingDown) {
     console.log('🧹 Limpiando pool de navegadores...');
@@ -82,47 +104,61 @@ setInterval(async () => {
     }
     console.log('✨ Pool limpiado');
   }
-}, 30 * 60 * 1000); // Cada 30 minutos
+}, 15 * 60 * 1000); // Cada 15 minutos en lugar de 30
 
-// Manejo de cierre graceful
-process.on('SIGTERM', async () => {
-  console.log('🛑 Iniciando cierre graceful...');
+// Monitoreo de memoria cada 5 minutos
+setInterval(() => {
+  const memUsage = process.memoryUsage();
+  console.log(`📊 Memoria: RSS=${Math.round(memUsage.rss/1024/1024)}MB, Heap=${Math.round(memUsage.heapUsed/1024/1024)}MB, Pool=${browserPool.length} browsers`);
+}, 5 * 60 * 1000);
+
+// Manejo de cierre graceful mejorado
+const gracefulShutdown = async (signal: string) => {
+  console.log(`🛑 Recibida señal ${signal}, iniciando cierre graceful...`);
   isShuttingDown = true;
   
   const browsersToClose = browserPool.splice(0);
-  for (const browser of browsersToClose) {
-    try {
-      await browser.close();
-    } catch (error) {
-      console.error('Error en cierre graceful:', error);
-    }
-  }
+  console.log(`🔄 Cerrando ${browsersToClose.length} browsers del pool...`);
   
+  await Promise.allSettled(
+    browsersToClose.map(browser => browser.close())
+  );
+  
+  console.log('✅ Cierre completado');
   process.exit(0);
-});
-// =======================================
-// FIN POOL DE BROWSERS
-// =======================================
+};
 
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// =======================================
+// EXPRESS APP
+// =======================================
 const app = express();
+app.use(express.json({ limit: '10mb' })); // Limitar tamaño de requests
 
-app.use(express.json());
-
-// Endpoint de prueba
+// Endpoint de prueba actualizado
 app.get('/', (req, res) => {
   res.json({ 
     status: 'ok', 
-    message: 'Playwright Stealth API funcionando en Railway',
+    message: 'Playwright Stealth API optimizada funcionando en Railway',
     endpoints: {
-      'POST /playwright': 'Captura screenshot y título de una página',
-      'POST /resolve-url': 'Resuelve URL final (simplificado)'
+      'POST /final-url': 'Resuelve URL final siguiendo redirecciones'
+    },
+    stats: {
+      poolSize: browserPool.length,
+      maxBrowsers: MAX_BROWSERS,
+      memoryUsage: `${Math.round(process.memoryUsage().heapUsed/1024/1024)}MB`
     }
   });
 });
 
-
-// Endpoint para seguir redirecciones hasta la URL final
+// ENDPOINT ÚNICO OPTIMIZADO - Combina ambas funcionalidades
 app.post('/final-url', async (req, res) => {
+  let browser = null;
+  let context = null;
+  const startTime = Date.now();
+  
   try {
     const { url } = req.body;
     
@@ -135,18 +171,15 @@ app.post('/final-url', async (req, res) => {
 
     console.log(`🔗 Siguiendo redirecciones para: ${url}`);
     
-    const browser = await chromium.launch({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-blink-features=AutomationControlled'
-      ]
-    });
-
-    const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    // Usar el pool de browsers optimizado
+    browser = await getBrowser();
+    
+    // Crear contexto con configuración anti-detección optimizada
+    context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      viewport: { width: 1366, height: 768 },
+      locale: 'es-ES',
+      timezoneId: 'Europe/Madrid'
     });
 
     const page = await context.newPage();
@@ -156,20 +189,36 @@ app.post('/final-url', async (req, res) => {
     
     // Escuchar todas las respuestas para capturar redirecciones
     page.on('response', response => {
-      redirectChain.push(response.url());
+      const responseUrl = response.url();
+      if (!redirectChain.includes(responseUrl)) {
+        redirectChain.push(responseUrl);
+      }
     });
     
-    // Navegar y seguir todas las redirecciones
+    // Bloquear recursos innecesarios para mejor performance
+    await page.route('**/*', (route) => {
+      const resourceType = route.request().resourceType();
+      if (['image', 'font', 'media'].includes(resourceType)) {
+        route.abort();
+      } else {
+        route.continue();
+      }
+    });
+    
+    // Navegar con timeout optimizado
     const response = await page.goto(url, { 
       waitUntil: 'domcontentloaded',
-      timeout: 30000 
+      timeout: 12000 // Timeout más agresivo
     });
     
     const finalUrl = page.url();
     const title = await page.title();
     const statusCode = response?.status() || 0;
+    const processingTime = Date.now() - startTime;
     
-    await browser.close();
+    // Cerrar solo el contexto para reutilizar el browser
+    await context.close();
+    context = null;
     
     res.json({
       status: 'success',
@@ -178,82 +227,51 @@ app.post('/final-url', async (req, res) => {
       title: title,
       statusCode: statusCode,
       redirectCount: redirectChain.length - 1,
-      redirectChain: [...new Set(redirectChain)] // Eliminar duplicados
+      redirectChain: [...new Set(redirectChain)], // Eliminar duplicados
+      processingTime: `${processingTime}ms`,
+      poolStats: {
+        browsersInPool: browserPool.length,
+        maxBrowsers: MAX_BROWSERS
+      }
     });
     
   } catch (error) {
-    if (error instanceof Error) {
-      res.status(500).json({ 
-        status: 'error', 
-        message: error.message,
-        originalUrl: req.body.url || 'unknown'
-      });
-    } else {
-      res.status(500).json({ 
-        status: 'error', 
-        message: 'Error desconocido al seguir redirecciones',
-        originalUrl: req.body.url || 'unknown'
-      });
+    console.error('Error en final-url:', error);
+    
+    // Cleanup en caso de error
+    if (context) {
+      try {
+        await context.close();
+      } catch (e) {
+        console.error('Error cerrando contexto:', e);
+      }
     }
-  }
-});
-
-
-
-// ✅ Corrección 2: Convertir PORT a number
-const PORT = parseInt(process.env.PORT || '3000', 10);
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Servidor Playwright corriendo en http://0.0.0.0:${PORT}`);
-});
-
-app.post('/final-url', async (req, res) => {
-  let browser = null;
-  try {
-    const { url } = req.body;
-    if (!url) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'URL es requerida'
-      });
-    }
-
-    browser = await getBrowser();
-    const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    });
     
-    const page = await context.newPage();
-    
-    // Tu lógica existente aquí...
-    const response = await page.goto(url, {
-      waitUntil: 'domcontentloaded',
-      timeout: 15000 // Reducir timeout
-    });
-    
-    const finalUrl = page.url();
-    const title = await page.title();
-    
-    // Cerrar solo el contexto, no el navegador
-    await context.close();
-    
-    res.json({
-      status: 'success',
-      originalUrl: url,
-      finalUrl: finalUrl,
-      title: title,
-      statusCode: response?.status() || 0
-    });
-    
-  } catch (error) {
-    res.status(500).json({
-      status: 'error',
-      message: error instanceof Error ? error.message : 'Error desconocido',
-      originalUrl: req.body.url || 'unknown'
+    res.status(500).json({ 
+      status: 'error', 
+      message: error instanceof Error ? error.message : 'Error desconocido al seguir redirecciones',
+      originalUrl: req.body.url || 'unknown',
+      processingTime: `${Date.now() - startTime}ms`
     });
   } finally {
     if (browser) {
       await releaseBrowser(browser);
     }
   }
+});
+
+// Middleware de manejo de errores global
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error('Error no manejado:', err);
+  res.status(500).json({
+    status: 'error',
+    message: 'Error interno del servidor'
+  });
+});
+
+const PORT = parseInt(process.env.PORT || '3000', 10);
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Servidor Playwright optimizado corriendo en http://0.0.0.0:${PORT}`);
+  console.log(`📊 Pool configurado para ${MAX_BROWSERS} browsers máximo`);
 });
