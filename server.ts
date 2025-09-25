@@ -9,7 +9,7 @@ chromium.use(StealthPlugin());
 // POOL DE BROWSERS - AGREGAR AQUÍ
 // =======================================
 let browserPool: any[] = [];
-const MAX_BROWSERS = 2; // Limitar a 2 navegadores simultáneos
+const MAX_BROWSERS = 1; // Limitar a 1 navegador simultáneos
 let isShuttingDown = false;
 
 async function getBrowser() {
@@ -27,10 +27,11 @@ async function getBrowser() {
         '--disable-setuid-sandbox',
         '--single-process',
         '--memory-pressure-off',
-        '--max_old_space_size=512',
+        '--max_old_space_size=800',
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding'
+        '--disable-renderer-backgrounding',
+        '--disable-features=VizDisplayCompositor'
       ],
       timeout: 30000
     });
