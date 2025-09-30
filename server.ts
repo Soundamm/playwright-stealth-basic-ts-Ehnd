@@ -1,9 +1,13 @@
 import express from 'express';
-import { chromium } from 'playwright-extra'; // permanece igual
+import { chromium } from 'playwright-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+// Cambiar los imports de tipos
+import type { Browser, BrowserContext, Page, Response } from 'playwright';
 
-// Importa solo los tipos desde 'playwright'
-import type { Browser, BrowserContext, Page, APIResponse } from 'playwright';
+console.log('🚀 Iniciando servidor Playwright...');
+console.log('📊 Variables de entorno:');
+console.log('- NODE_ENV:', process.env.NODE_ENV);
+console.log('- PORT:', process.env.PORT);
 
 chromium.use(StealthPlugin());
 
@@ -94,8 +98,39 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
+process.on('uncaughtException', (error) => {
+  console.error('❌ Error no capturado:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Promesa rechazada no manejada en:', promise, 'razón:', reason);
+  process.exit(1);
+});
+
 const app = express();
 app.use(express.json());
+
+// Health check endpoints
+app.get('/', (req, res) => {
+  res.json({
+    status: 'ok',
+    message: 'Playwright Stealth API funcionando',
+    timestamp: new Date().toISOString(),
+    poolSize: browserPool.length,
+    endpoints: {
+      'POST /final-url': 'Procesa URLs y devuelve información final'
+    }
+  });
+});
+
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'healthy', 
+    uptime: process.uptime(),
+    poolSize: browserPool.length 
+  });
+});
 
 app.post('/final-url', async (req, res) => {
   let browser: Browser | null = null;
@@ -107,6 +142,7 @@ app.post('/final-url', async (req, res) => {
       return res.status(400).json({ status: 'error', message: 'URL es requerida' });
     }
 
+    console.log(`🔗 Procesando URL: ${url}`);
     browser = await getBrowser();
 
     context = await browser.newContext({
@@ -114,14 +150,15 @@ app.post('/final-url', async (req, res) => {
     });
 
     const page: Page = await context.newPage();
-
     const redirectChain: string[] = [];
 
-    page.on('response', (response: APIResponse) => {
-      redirectChain.push(response.url());
+    // ✅ CORREGIDO: Usar 'request' en lugar de 'response'
+    page.on('request', (request) => {
+      redirectChain.push(request.url());
     });
 
-    const response: APIResponse | null = await page.goto(url, {
+    // ✅ CORREGIDO: Usar Response en lugar de APIResponse
+    const response: Response | null = await page.goto(url, {
       waitUntil: 'domcontentloaded',
       timeout: 15000,
     });
@@ -131,6 +168,7 @@ app.post('/final-url', async (req, res) => {
     const statusCode: number = response?.status() || 0;
 
     await page.close();
+    console.log(`✅ URL procesada exitosamente: ${finalUrl}`);
 
     res.json({
       status: 'success',
