@@ -14,34 +14,6 @@ let browserPool: Browser[] = [];
 const MAX_BROWSERS = 2;
 let isShuttingDown = false;
 
-async function getBrowser(): Promise<Browser> {
-  if (isShuttingDown) {
-    throw new Error('Server is shutting down');
-  }
-
-  browserPool = browserPool.filter(browser => browser.isConnected());
-  
-  if (browserPool.length === 0) {
-    console.log('🚀 Creando nuevo browser (pool vacío)...');
-    return await createNewBrowser();
-  }
-  
-  for (const browser of browserPool) {
-    if (browser.isConnected() && browser.contexts().length < 3) {
-      console.log(`♻️ Reutilizando browser del pool (${browser.contexts().length} contextos)`);
-      return browser;
-    }
-  }
-  
-  if (browserPool.length < MAX_BROWSERS) {
-    console.log('🆕 Creando browser adicional (pool ocupado)...');
-    return await createNewBrowser();
-  }
-  
-  console.log('⚠️ Usando primer browser del pool (sobrecargado)');
-  return browserPool[0];
-}
-
 async function createNewBrowser(): Promise<Browser> {
   try {
     const browser: Browser = await chromium.launch({
@@ -56,46 +28,76 @@ async function createNewBrowser(): Promise<Browser> {
         '--disable-renderer-backgrounding',
         '--disable-features=VizDisplayCompositor',
         '--disable-web-security',
-        '--disable-features=site-per-process'
+        '--disable-features=site-per-process',
       ],
-      timeout: 45000
+      timeout: 45000,
     });
-    
     browserPool.push(browser);
     console.log(`✅ Browser creado. Pool size: ${browserPool.length}`);
     return browser;
-    
   } catch (error) {
     console.error('❌ Error creando browser:', error);
     throw error;
   }
 }
 
+async function getBrowser(): Promise<Browser> {
+  if (isShuttingDown) {
+    throw new Error('Server is shutting down');
+  }
+
+  // Mantener solo browsers conectados
+  browserPool = browserPool.filter((browser) => browser.isConnected());
+
+  // Si no hay browsers, crear uno
+  if (browserPool.length === 0) {
+    console.log('🚀 Creando nuevo browser (pool vacío)...');
+    return await createNewBrowser();
+  }
+
+  // Reutilizar uno con pocos contextos
+  for (const browser of browserPool) {
+    if (browser.isConnected() && browser.contexts().length < 3) {
+      console.log(`♻️ Reutilizando browser del pool (${browser.contexts().length} contextos)`);
+      return browser;
+    }
+  }
+
+  // Si el pool está ocupado pero aún no al máximo, crear otro
+  if (browserPool.length < MAX_BROWSERS) {
+    console.log('🆕 Creando browser adicional (pool ocupado)...');
+    return await createNewBrowser();
+  }
+
+  // Último recurso: devolver el primero (sobrecargado)
+  console.log('⚠️ Usando primer browser del pool (sobrecargado)');
+  return browserPool[0];
+}
+
+// Liberar browser: hoy en día cerramos contextos ociosos, no forzamos cierre
 async function releaseBrowser(browser: Browser): Promise<void> {
   if (!browser || !browser.isConnected()) {
     console.log('⚠️ Browser no válido para release');
     return;
   }
-
   try {
     const contexts = browser.contexts();
-    console.log(`🔄 Limpiando ${contexts.length} contextos del browser`);
-    
-    // ✅ CORREGIDO: Cerrar contextos sin usar isClosed()
+    console.log(`🔄 Limpiando ${contexts.length} contextos del browser (solo inactivos)`);
     for (const context of contexts) {
       try {
-        await context.close();
+        // Cerrar solo contextos sin páginas para no interrumpir tráficos activos
+        if (context.pages().length === 0) {
+          await context.close();
+        }
       } catch (contextError) {
         console.log('Context ya estaba cerrado o error al cerrar:', contextError);
       }
     }
-    
     console.log('✅ Browser liberado correctamente');
-    
   } catch (error) {
     console.error('❌ Error liberando browser:', error);
-    
-    browserPool = browserPool.filter(b => b !== browser);
+    // Si falló la liberación, quitar del pool y cerrar
+    browserPool = browserPool.filter((b) => b !== browser);
     try {
       await browser.close();
       console.log('🗑️ Browser problemático eliminado del pool');
@@ -105,24 +107,25 @@ async function releaseBrowser(browser: Browser): Promise<void> {
   }
 }
 
+// Limpieza programada: no cerrar contextos en uso, solo desconectados o sin páginas
 setInterval(async () => {
   if (browserPool.length > 0 && !isShuttingDown) {
     console.log('🧹 Limpieza programada de pool...');
-    
     for (let i = browserPool.length - 1; i >= 0; i--) {
       const browser = browserPool[i];
-      
+
       if (!browser.isConnected()) {
         console.log(`🗑️ Removiendo browser desconectado [${i}]`);
         browserPool.splice(i, 1);
         continue;
       }
-      
+
       try {
-        const contexts = browser.contexts();
-        for (const context of contexts) {
+        for (const ctx of browser.contexts()) {
           try {
-            await context.close();
+            if (ctx.pages().length === 0) {
+              await ctx.close();
+            }
           } catch (contextError) {
             console.log('Context error en limpieza:', contextError);
           }
@@ -131,15 +134,14 @@ setInterval(async () => {
         console.error(`❌ Error en limpieza de browser [${i}]:`, error);
       }
     }
-    
     console.log(`✨ Pool limpiado. Browsers activos: ${browserPool.length}`);
   }
 }, 5 * 60 * 1000);
 
+// Señales de proceso
 process.on('SIGTERM', async () => {
   console.log('🛑 Iniciando cierre graceful...');
   isShuttingDown = true;
-  
   const browsersToClose = browserPool.splice(0);
   for (const browser of browsersToClose) {
     try {
@@ -148,7 +150,6 @@ process.on('SIGTERM', async () => {
       console.error('Error en cierre:', e);
     }
   }
-  
   process.exit(0);
 });
 
@@ -169,9 +170,8 @@ app.get('/', (req, res) => {
   const poolStatus = browserPool.map((browser, index) => ({
     index,
     connected: browser.isConnected(),
-    contexts: browser.contexts().length
+    contexts: browser.contexts().length,
   }));
-
   res.json({
     status: 'ok',
     message: 'Playwright Stealth API funcionando',
@@ -179,21 +179,22 @@ app.get('/', (req, res) => {
     poolSize: browserPool.length,
     poolStatus,
     endpoints: {
-      'POST /final-url': 'Procesa URLs y devuelve información final'
-    }
+      'POST /final-url': 'Procesa URLs y devuelve información final',
+    },
   });
 });
 
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'healthy', 
+  res.json({
+    status: 'healthy',
     uptime: process.uptime(),
-    poolSize: browserPool.length 
+    poolSize: browserPool.length,
   });
 });
 
 app.post('/final-url', async (req, res) => {
   const startTime = Date.now();
+
   let browser: Browser | null = null;
   let context: BrowserContext | null = null;
   let wasBrowserFromPool = false;
@@ -201,38 +202,41 @@ app.post('/final-url', async (req, res) => {
   try {
     const { url }: { url?: string } = req.body;
     if (!url) {
-      return res.status(400).json({ 
-        status: 'error', 
-        message: 'URL es requerida' 
+      return res.status(400).json({
+        status: 'error',
+        message: 'URL es requerida',
       });
     }
 
+    // Validación básica de URL
     try {
       new URL(url);
-    } catch (urlError) {
+    } catch {
       return res.status(400).json({
         status: 'error',
         message: 'URL inválida',
-        originalUrl: url
+        originalUrl: url,
       });
     }
 
     console.log(`🔗 [${new Date().toISOString()}] Procesando URL: ${url}`);
-    
+
     browser = await getBrowser();
     wasBrowserFromPool = browserPool.includes(browser);
-    
-    console.log(`📊 Browser obtenido. Pool size: ${browserPool.length}, Contextos: ${browser.contexts().length}`);
+    console.log(
+      `📊 Browser obtenido. Pool size: ${browserPool.length}, Contextos: ${browser.contexts().length}`,
+    );
 
     context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       viewport: { width: 1366, height: 768 },
-      ignoreHTTPSErrors: true
+      ignoreHTTPSErrors: true,
     });
 
     const page: Page = await context.newPage();
-    const redirectChain: string[] = [];
 
+    const redirectChain: string[] = [];
     page.on('request', (request) => {
       if (request.resourceType() === 'document') {
         redirectChain.push(request.url());
@@ -241,7 +245,7 @@ app.post('/final-url', async (req, res) => {
 
     const response: Response | null = await page.goto(url, {
       waitUntil: 'domcontentloaded',
-      timeout: 20000,
+      timeout: 30000, // aumentado para sitios más lentos
     });
 
     const finalUrl: string = page.url();
@@ -253,7 +257,7 @@ app.post('/final-url', async (req, res) => {
     const processingTime = Date.now() - startTime;
     console.log(`✅ [${new Date().toISOString()}] URL procesada: ${finalUrl} (${processingTime}ms)`);
 
-    res.json({
+    return res.json({
       status: 'success',
       originalUrl: url,
       finalUrl,
@@ -261,44 +265,75 @@ app.post('/final-url', async (req, res) => {
       statusCode,
       redirectCount: Math.max(0, redirectChain.length - 1),
       redirectChain: [...new Set(redirectChain)],
-      processingTime: `${processingTime}ms`
+      processingTime: `${processingTime}ms`,
     });
-
-  } catch (error) {
+  } catch (error: unknown) {
     const processingTime = Date.now() - startTime;
-    // ✅ CORREGIDO: Casting explícito para el tipo unknown
-    const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+    const msg = error instanceof Error ? error.message : String(error);
     console.error(`❌ [${new Date().toISOString()}] Error procesando ${req.body.url}:`, error);
 
-    if (context) {
+    // Reintento liviano: si fue cierre de page/contexto y el browser sigue vivo
+    if (
+      browser &&
+      wasBrowserFromPool &&
+      browser.isConnected() &&
+      (/Target page/i.test(msg) || /context/i.test(msg) || /Page closed/i.test(msg))
+    ) {
       try {
-        await context.close();
-      } catch (contextError) {
-        console.error('Error cerrando contexto tras error:', contextError);
+        const retryCtx = await browser.newContext({ ignoreHTTPSErrors: true });
+        const retryPage = await retryCtx.newPage();
+        const resp = await retryPage.goto(req.body.url, {
+          waitUntil: 'domcontentloaded',
+          timeout: 30000,
+        });
+        const finalUrl = retryPage.url();
+        const title = await retryPage.title().catch(() => 'Sin título');
+        const statusCode = resp?.status() || 0;
+        await retryPage.close();
+        await retryCtx.close().catch(() => {});
+        return res.json({
+          status: 'success',
+          originalUrl: req.body.url,
+          finalUrl,
+          title,
+          statusCode,
+          redirectCount: 0, // no reciclamos redirectChain del intento previo
+          redirectChain: [],
+          processingTime: `${Date.now() - startTime}ms`,
+        });
+      } catch (retryErr) {
+        console.error('🔁 Reintento falló:', retryErr);
       }
     }
 
-    // ✅ CORREGIDO: Verificación de tipo para error
-    if (browser && wasBrowserFromPool && (!browser.isConnected() || 
-        (error instanceof Error && error.message.includes('Target page, context or browser has been closed')))) {
-      console.log('🚨 Browser corrupto detectado, removiendo del pool');
-      browserPool = browserPool.filter(b => b !== browser);
+    // Expulsar del pool solo si el browser realmente está caído
+    const fatal =
+      !browser?.isConnected() ||
+      /browser has been closed|Browser closed/i.test(msg);
+
+    if (browser && wasBrowserFromPool && fatal) {
+      console.log('🚨 Browser realmente caído, removiendo del pool');
+      browserPool = browserPool.filter((b) => b !== browser);
       try {
         await browser.close();
       } catch (browserCloseError) {
-        console.error('Error cerrando browser corrupto:', browserCloseError);
+        console.error('Error cerrando browser caído:', browserCloseError);
       }
       browser = null;
     }
 
-    res.status(500).json({
+    return res.status(500).json({
       status: 'error',
-      message: errorMessage,
+      message: msg || 'Error desconocido',
       originalUrl: req.body.url || 'unknown',
-      processingTime: `${processingTime}ms`
+      processingTime: `${processingTime}ms`,
     });
-
   } finally {
+    // Cerrar contexto siempre, incluso en éxito
+    if (context) {
+      await context.close().catch(() => {});
+    }
+    // Liberar browser si sigue en el pool
     if (browser && browserPool.includes(browser)) {
       await releaseBrowser(browser);
     }
